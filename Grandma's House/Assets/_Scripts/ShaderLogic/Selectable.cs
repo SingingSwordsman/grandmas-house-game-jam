@@ -1,4 +1,4 @@
-using UnityEngine;
+﻿using UnityEngine;
 using System.Collections.Generic;
 
 public class Selectable : MonoBehaviour
@@ -10,6 +10,9 @@ public class Selectable : MonoBehaviour
     [SerializeField] private float damping = 10f;
     [SerializeField] private float depthMoveSpeed = 5f;
 
+    public Vector3 BoundsMin => boundsMin;
+    public Vector3 BoundsMax => boundsMax;
+
     public static bool IsDragging { get; private set; }
 
     private Renderer _renderer;
@@ -18,10 +21,11 @@ public class Selectable : MonoBehaviour
     private Camera _cam;
 
     private bool _dragging;
-    private Vector3 _worldTarget;  // target position in world space directly
-    private Plane _dragPlane;       // plane we raycast against to get world position
+    private bool _inventoryDrag;
+    private Vector3 _worldTarget;
+    private Plane _dragPlane;
 
-    void Start()
+    void Awake()
     {
         _renderer = GetComponent<Renderer>();
         _defaultMaterials = _renderer.materials;
@@ -29,32 +33,44 @@ public class Selectable : MonoBehaviour
         _cam = Camera.main;
     }
 
-    void OnMouseEnter()
-    {
-        if (_dragging) return;
-        AddOutline();
-    }
-
-    void OnMouseExit()
-    {
-        if (_dragging) return;
-        RemoveOutline();
-    }
+    // ── Normal mouse interaction ───────────────────────────────────
+    void OnMouseEnter() { if (!_dragging) AddOutline(); }
+    void OnMouseExit() { if (!_dragging) RemoveOutline(); }
 
     void OnMouseDown()
+    {
+        if (_inventoryDrag) return;
+        StartDrag(transform.position);
+    }
+
+    void OnMouseUp()
+    {
+        if (!_dragging) return;
+        _inventoryDrag = false;
+        StopDrag();
+    }
+
+    // ── Called by InventoryPanel right after Instantiate ──────────
+    public void BeginDragFromInventory(Vector3 spawnPos)
+    {
+        _inventoryDrag = true;
+        StartDrag(spawnPos);
+    }
+
+    // ── Shared drag start ──────────────────────────────────────────
+    void StartDrag(Vector3 startWorldPos)
     {
         _dragging = true;
         IsDragging = true;
         _rb.useGravity = false;
 
-        // Create a drag plane at the object's current position facing the camera
-        _dragPlane = new Plane(-_cam.transform.forward, transform.position);
-        _worldTarget = transform.position;
+        _worldTarget = startWorldPos;
+        _dragPlane = new Plane(-_cam.transform.forward, startWorldPos);
 
         AddOutline();
     }
 
-    void OnMouseUp()
+    void StopDrag()
     {
         _dragging = false;
         IsDragging = false;
@@ -62,37 +78,30 @@ public class Selectable : MonoBehaviour
         RemoveOutline();
     }
 
+    // ── Every frame while dragging ─────────────────────────────────
     void Update()
     {
         if (!_dragging) return;
 
-        // Move the drag plane closer or further from camera with W/S
         if (Input.GetKey(KeyCode.W))
             _worldTarget += _cam.transform.forward * depthMoveSpeed * Time.deltaTime;
         if (Input.GetKey(KeyCode.S))
             _worldTarget -= _cam.transform.forward * depthMoveSpeed * Time.deltaTime;
 
-        // Raycast from mouse onto the drag plane to get world position
         Ray ray = _cam.ScreenPointToRay(Input.mousePosition);
         if (_dragPlane.Raycast(ray, out float distance))
         {
             Vector3 mouseWorld = ray.GetPoint(distance);
-
-            // Get current target in camera local space
             Vector3 localTarget = _cam.transform.InverseTransformPoint(_worldTarget);
             Vector3 localMouse = _cam.transform.InverseTransformPoint(mouseWorld);
 
-            // Take XY from mouse but keep Z (depth) from W/S input
             localTarget.x = localMouse.x;
             localTarget.y = localMouse.y;
 
-            // Convert back to world space
             _worldTarget = _cam.transform.TransformPoint(localTarget);
-
             _dragPlane = new Plane(-_cam.transform.forward, _worldTarget);
         }
 
-        // Clamp target to bounds BEFORE applying force so physics never fights a clamped position
         _worldTarget = new Vector3(
             Mathf.Clamp(_worldTarget.x, boundsMin.x, boundsMax.x),
             Mathf.Clamp(_worldTarget.y, boundsMin.y, boundsMax.y),
@@ -109,7 +118,6 @@ public class Selectable : MonoBehaviour
             _rb.linearVelocity *= (1f - damping * Time.fixedDeltaTime);
         }
 
-        // Always clamp position regardless of dragging or physics velocity
         Vector3 pos = transform.position;
         Vector3 vel = _rb.linearVelocity;
 
