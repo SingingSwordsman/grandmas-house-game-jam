@@ -9,7 +9,7 @@ Shader"Custom/Outline"
     SubShader
     {
         Tags { "RenderType"="Opaque" }
-
+        
         Pass
         {
 Name"Outline"

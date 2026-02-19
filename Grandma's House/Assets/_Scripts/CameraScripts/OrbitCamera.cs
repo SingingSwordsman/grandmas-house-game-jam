@@ -1,48 +1,51 @@
 ﻿using UnityEngine;
 
-public class OrbitCamera : MonoBehaviour
+public class LockedCamera : MonoBehaviour
 {
     [Header("Target")]
-    [Tooltip("The point the camera orbits around. Leave empty to auto-create one at scene origin.")]
+    [Tooltip("The point the camera looks at. Leave empty to auto-create one at scene origin.")]
     public Transform target;
 
-    [Header("Orbit Settings")]
-    public float orbitSpeed = 5f;
-    [Range(-89f, 0f)] public float minVerticalAngle = -80f;
-    [Range(0f, 89f)] public float maxVerticalAngle = 80f;
+    [Header("Pan Settings")]
+    public float panSpeed = 5f;
+    public float minHorizontalOffset = -5f;
+    public float maxHorizontalOffset = 5f;
+    public float panSmoothTime = 0.1f;
 
     [Header("Zoom Settings")]
     public float zoomSpeed = 5f;
-    public float minDistance = 1f;
-    public float maxDistance = 20f;
-    public float smoothTime = 0.1f;   // Smoothing for zoom
+    public float minDistance = 3f;
+    public float maxDistance = 15f;
+    public float zoomSmoothTime = 0.1f;
 
     [Header("Initial State")]
     public float initialDistance = 8f;
-    public float initialHorizontalAngle = 45f;
-    public float initialVerticalAngle = 30f;
+    public float initialHorizontalOffset = 0f;
+    public float fixedVerticalAngle = 20f;   // Static up/down look angle
+    public float fixedHorizontalAngle = 0f;  // Static left/right facing direction
 
     // ── Private state ─────────────────────────────────────────────────────────
-    private float _horizontalAngle;
-    private float _verticalAngle;
-    private float _currentDistance;
     private float _targetDistance;
+    private float _currentDistance;
     private float _zoomVelocity;
+
+    private float _targetHorizontalOffset;
+    private float _currentHorizontalOffset;
+    private float _panVelocity;
 
     // ─────────────────────────────────────────────────────────────────────────
     private void Awake()
     {
-        // Auto-create a target at the world origin if none assigned
         if (target == null)
         {
-            GameObject pivot = new GameObject("CameraOrbitTarget");
+            GameObject pivot = new GameObject("CameraTarget");
             target = pivot.transform;
         }
 
-        _horizontalAngle = initialHorizontalAngle;
-        _verticalAngle = initialVerticalAngle;
-        _currentDistance = initialDistance;
         _targetDistance = initialDistance;
+        _currentDistance = initialDistance;
+        _targetHorizontalOffset = initialHorizontalOffset;
+        _currentHorizontalOffset = initialHorizontalOffset;
 
         ApplyTransform();
     }
@@ -51,30 +54,26 @@ public class OrbitCamera : MonoBehaviour
     {
         if (Selectable.IsDragging == true) return;
 
-        HandleOrbitInput();
+        HandlePanInput();
         HandleZoomInput();
-        SmoothZoom();
+        SmoothValues();
         ApplyTransform();
     }
 
     // ── Input ─────────────────────────────────────────────────────────────────
 
-    private void HandleOrbitInput()
+    private void HandlePanInput()
     {
-        // Orbit on: Middle Mouse drag  OR  Right Mouse drag  OR  Alt + Left Mouse drag
-        bool orbiting = Input.GetMouseButton(2)
-                     || Input.GetMouseButton(1)
-                     || (Input.GetMouseButton(0) && Input.GetKey(KeyCode.LeftAlt));
+        // Pan on: Middle Mouse drag  OR  Right Mouse drag  OR  Alt + Left Mouse drag
+        bool panning = Input.GetMouseButton(2)
+                    || Input.GetMouseButton(1)
+                    || (Input.GetMouseButton(0) && Input.GetKey(KeyCode.LeftAlt));
 
-        if (!orbiting) return;
+        if (!panning) return;
 
         float mouseX = Input.GetAxis("Mouse X");
-        float mouseY = Input.GetAxis("Mouse Y");
-
-        _horizontalAngle += mouseX * orbitSpeed;
-        _verticalAngle -= mouseY * orbitSpeed;   // invert Y so dragging up tilts up
-
-        _verticalAngle = Mathf.Clamp(_verticalAngle, minVerticalAngle, maxVerticalAngle);
+        _targetHorizontalOffset -= mouseX * panSpeed * 0.1f;
+        _targetHorizontalOffset = Mathf.Clamp(_targetHorizontalOffset, minHorizontalOffset, maxHorizontalOffset);
     }
 
     private void HandleZoomInput()
@@ -87,40 +86,43 @@ public class OrbitCamera : MonoBehaviour
         }
     }
 
-    private void SmoothZoom()
+    private void SmoothValues()
     {
         _currentDistance = Mathf.SmoothDamp(
             _currentDistance, _targetDistance,
-            ref _zoomVelocity, smoothTime);
-    }
+            ref _zoomVelocity, zoomSmoothTime);
 
-    // ── Transform ─────────────────────────────────────────────────────────────
+        _currentHorizontalOffset = Mathf.SmoothDamp(
+            _currentHorizontalOffset, _targetHorizontalOffset,
+            ref _panVelocity, panSmoothTime);
+    }
 
     private void ApplyTransform()
     {
-        // Build a rotation from the two angles
-        Quaternion rotation = Quaternion.Euler(_verticalAngle, _horizontalAngle, 0f);
+        // Fixed rotation — no orbiting
+        Quaternion rotation = Quaternion.Euler(fixedVerticalAngle, fixedHorizontalAngle, 0f);
 
-        // Position the camera behind and above the target by _currentDistance
-        Vector3 offset = rotation * new Vector3(0f, 0f, -_currentDistance);
-        transform.position = target.position + offset;
+        // Base position behind the target
+        Vector3 baseOffset = rotation * new Vector3(0f, 0f, -_currentDistance);
 
-        // Always look at the target
-        transform.LookAt(target.position);
+        // Horizontal pan is applied in world-space right relative to our fixed facing direction
+        Vector3 right = rotation * Vector3.right;
+        Vector3 panOffset = right * _currentHorizontalOffset;
+
+        transform.position = target.position + baseOffset + panOffset;
+        transform.LookAt(target.position + panOffset); // look toward the panned point so framing feels natural
     }
 
+    // ── Public API ────────────────────────────────────────────────────────────
 
     public void ResetCamera()
     {
-        _horizontalAngle = initialHorizontalAngle;
-        _verticalAngle = initialVerticalAngle;
         _targetDistance = initialDistance;
         _currentDistance = initialDistance;
+        _targetHorizontalOffset = initialHorizontalOffset;
+        _currentHorizontalOffset = initialHorizontalOffset;
         ApplyTransform();
     }
 
-    public void SetTarget(Transform newTarget)
-    {
-        target = newTarget;
-    }
+    public void SetTarget(Transform newTarget) => target = newTarget;
 }
